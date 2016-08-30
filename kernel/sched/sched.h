@@ -545,6 +545,9 @@ struct root_domain {
 	cpumask_var_t span;
 	cpumask_var_t online;
 
+	/* Indicate more than one runnable task for any CPU */
+	bool overload;
+
 	/*
 	 * The bit corresponding to a CPU gets set here if such CPU has more
 	 * than one runnable -deadline task (as it is below for RT tasks).
@@ -669,6 +672,7 @@ struct rq {
 	int mostly_idle_nr_run;
 	int mostly_idle_freq;
 	unsigned long hmp_flags;
+	unsigned int cur_freq, max_freq, min_freq, max_possible_freq;
 
 	u64 cur_irqload;
 	u64 avg_irqload;
@@ -1668,15 +1672,20 @@ static inline void inc_nr_running(struct rq *rq)
 	sched_update_nr_prod(cpu_of(rq), 1, true);
 	rq->nr_running++;
 
+	if (rq->nr_running >= 2) {
+#ifdef CONFIG_SMP
+		if (!rq->rd->overload)
+			rq->rd->overload = true;
+#endif
+
 #ifdef CONFIG_NO_HZ_FULL
-	if (rq->nr_running == 2) {
 		if (tick_nohz_full_cpu(rq->cpu)) {
 			/* Order rq->nr_running write against the IPI */
 			smp_wmb();
 			smp_send_reschedule(rq->cpu);
 		}
-       }
 #endif
+       }
 }
 
 static inline void dec_nr_running(struct rq *rq)
@@ -1974,3 +1983,16 @@ static inline u64 irq_time_read(int cpu)
 }
 #endif /* CONFIG_64BIT */
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
+
+static inline void account_reset_rq(struct rq *rq)
+{
+#ifdef CONFIG_IRQ_TIME_ACCOUNTING
+	rq->prev_irq_time = 0;
+#endif
+#ifdef CONFIG_PARAVIRT
+	rq->prev_steal_time = 0;
+#endif
+#ifdef CONFIG_PARAVIRT_TIME_ACCOUNTING
+	rq->prev_steal_time_rq = 0;
+#endif
+}
